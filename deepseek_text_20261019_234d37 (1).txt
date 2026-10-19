@@ -1,0 +1,4 @@
+chat-sim/
+├── index.html
+├── scenarios.js
+└── README.md

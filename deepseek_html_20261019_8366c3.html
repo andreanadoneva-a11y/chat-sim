@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Чат симулация — подбор и обучение</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --panel2:#273449; --txt:#e2e8f0;
+    --muted:#94a3b8; --accent:#38bdf8; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--txt)}
+  header{display:flex;gap:12px;align-items:center;padding:12px 16px;background:var(--panel);border-bottom:1px solid #334155;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;flex:1}
+  button{cursor:pointer;border:0;border-radius:8px;padding:8px 12px;font-size:14px;background:var(--panel2);color:var(--txt)}
+  button.active{background:var(--accent);color:#062033;font-weight:600}
+  button.primary{background:var(--accent);color:#062033;font-weight:600}
+  button.ghost{background:transparent;border:1px solid #475569}
+  main{display:grid;grid-template-columns:260px 1fr 320px;gap:12px;padding:12px;height:calc(100vh - 57px)}
+  @media(max-width:900px){main{grid-template-columns:1fr;height:auto}}
+  .panel{background:var(--panel);border-radius:12px;display:flex;flex-direction:column;overflow:hidden}
+  .panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0;padding:12px 14px;border-bottom:1px solid #334155}
+  .list{overflow:auto;padding:8px}
+  .scenario-item{padding:10px;border-radius:8px;margin-bottom:6px;background:var(--panel2);cursor:pointer;font-size:13px}
+  .scenario-item:hover{outline:1px solid var(--accent)}
+  .scenario-item .lvl{font-size:11px;color:var(--muted)}
+  .lvl.лесен{color:var(--ok)} .lvl.среден{color:var(--warn)} .lvl.труден{color:var(--bad)}
+  #chat{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+  .msg{max-width:80%;padding:10px 12px;border-radius:12px;font-size:14px;line-height:1.4;white-space:pre-wrap}
+  .msg.client{align-self:flex-start;background:var(--panel2);border-top-left-radius:4px}
+  .msg.cand{align-self:flex-end;background:var(--accent);color:#062033;border-top-right-radius:4px}
+  .msg.sys{align-self:center;background:transparent;color:var(--muted);font-size:12px}
+  .composer{display:flex;gap:8px;padding:10px;border-top:1px solid #334155;background:var(--panel2)}
+  .composer textarea{flex:1;resize:none;height:52px;border-radius:8px;border:1px solid #475569;background:#0b1220;color:var(--txt);padding:8px;font:inherit}
+  .kb{padding:12px;font-size:13px;overflow:auto}
+  .kb h3{font-size:12px;color:var(--muted);margin:12px 0 6px;text-transform:uppercase}
+  .kb ul{margin:0;padding-left:18px}
+  .kb li{margin-bottom:6px}
+  .score{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+  .score label{font-size:12px;color:var(--muted);display:block}
+  .score input{width:100%;background:#0b1220;border:1px solid #475569;color:var(--txt);border-radius:6px;padding:6px}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <h1>Симулация: подбор и обучение</h1>
+  <button id="btnCandidate" class="active">Кандидат</button>
+  <button id="btnMentor" class="ghost">Ментор</button>
+  <button id="btnReset" class="ghost">Ново начало</button>
+</header>
+
+<main>
+  <!-- Scenario list -->
+  <section class="panel">
+    <h2>Сценарии</h2>
+    <div id="scenarioList" class="list"></div>
+  </section>
+
+  <!-- Chat -->
+  <section class="panel">
+    <h2 id="chatTitle">Чат</h2>
+    <div id="chat"></div>
+    <div class="composer">
+      <textarea id="input" placeholder="Напиши отговора си като кандидат..."></textarea>
+      <button class="primary" id="send">Изпрати</button>
+    </div>
+  </section>
+
+  <!-- Knowledge / Mentor -->
+  <aside class="panel">
+    <h2 id="kbTitle">База знания</h2>
+    <div id="kb" class="kb"></div>
+  </aside>
+</main>
+
+<script src="scenarios.js"></script>
+<script>
+  const chatEl = document.getElementById('chat');
+  const listEl = document.getElementById('scenarioList');
+  const kbEl = document.getElementById('kb');
+  const inputEl = document.getElementById('input');
+  const chatTitle = document.getElementById('chatTitle');
+  const kbTitle = document.getElementById('kbTitle');
+
+  let currentId = 1;
+  let mode = 'candidate'; // or 'mentor'
+  let scores = {}; // {scenarioId: {speed, accuracy, empathy}}
+
+  function renderList(){
+    listEl.innerHTML = '';
+    SCENARIOS.forEach(s=>{
+      const d = document.createElement('div');
+      d.className = 'scenario-item';
+      d.innerHTML = `<div><strong>${s.id}. ${s.title}</strong></div>
+                     <div class="lvl ${s.level}">ниво: ${s.level}</div>`;
+      if(s.id === currentId) d.style.outline = '1px solid var(--accent)';
+      d.onclick = ()=>{ currentId = s.id; renderAll(); };
+      listEl.appendChild(d);
+    });
+  }
+
+  function addMsg(text, type){
+    const m = document.createElement('div');
+    m.className = 'msg ' + type;
+    m.textContent = text;
+    chatEl.appendChild(m);
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  function renderChat(){
+    chatEl.innerHTML = '';
+    const s = SCENARIOS.find(x=>x.id===currentId);
+    if(mode==='candidate'){
+      chatTitle.textContent = `Чат — ${s.title}`;
+      addMsg('Сценарий стартиран. По-долу клиентът пише първото си съобщение.', 'sys');
+      addMsg(s.client, 'client');
+    } else {
+      chatTitle.textContent = `Ментор — ${s.title}`;
+      addMsg('Менторски режим: тук виждаш очакваните действия и примерния отговор. Използвай полетата вдясно за оценка.', 'sys');
+    }
+  }
+
+  function renderKB(){
+    const s = SCENARIOS.find(x=>x.id===currentId);
+    if(mode==='candidate'){
+      kbTitle.textContent = 'База знания (скрита за кандидата)';
+      kbEl.innerHTML = `<p style="color:var(--muted)">В режим „Кандидат“ базата знания е скрита. Превключи на „Ментор“, за да видиш очакваните действия.</p>`;
+      return;
+    }
+    kbTitle.textContent = `Ментор — ${s.title}`;
+    kbEl.innerHTML = `
+      <div><strong>Ниво:</strong> <span class="lvl ${s.level}">${s.level}</span></div>
+      <h3>Очаквани действия</h3>
+      <ul>${s.expected.map(e=>`<li>${e}</li>`).join('')}</ul>
+      <h3>Примерен верен отговор</h3>
+      <p>${s.sample}</p>
+      <h3>Последващи въпроси</h3>
+      <ul>${s.followups.map(f=>`<li>${f}</li>`).join('')}</ul>
+      <h3>Оценка (1–5)</h3>
+      <div class="score">
+        <div><label>Бързина</label><input type="number" min="1" max="5" id="sc_speed" value="${scores[s.id]?.speed ?? ''}"></div>
+        <div><label>Точност</label><input type="number" min="1" max="5" id="sc_acc" value="${scores[s.id]?.accuracy ?? ''}"></div>
+        <div><label>Емпатия</label><input type="number" min="1" max="5" id="sc_emp" value="${scores[s.id]?.empathy ?? ''}"></div>
+        <div><label>&nbsp;</label><button class="primary" id="saveScore">Запази</button></div>
+      </div>
+    `;
+    const save = document.getElementById('saveScore');
+    if(save) save.onclick = ()=>{
+      scores[s.id] = {
+        speed: +document.getElementById('sc_speed').value || null,
+        accuracy: +document.getElementById('sc_acc').value || null,
+        empathy: +document.getElementById('sc_emp').value || null
+      };
+      alert('Оценката е запазена за сценарий ' + s.id + '.');
+    };
+  }
+
+  function renderAll(){ renderList(); renderChat(); renderKB(); }
+
+  // send message
+  document.getElementById('send').onclick = ()=>{
+    const txt = inputEl.value.trim();
+    if(!txt) return;
+    if(mode!=='candidate'){ alert('Премини в режим „Кандидат“, за да пишеш.'); return; }
+    addMsg(txt, 'cand');
+    inputEl.value = '';
+    // simple simulated reply from "client" after candidate answers
+    const s = SCENARIOS.find(x=>x.id===currentId);
+    setTimeout(()=>{
+      if(s.followups.length){
+        addMsg(s.followups[0], 'client');
+        s.followups.push(s.followups.shift()); // rotate followups
+      } else {
+        addMsg('Благодаря, това ми помага.', 'client');
+      }
+    }, 700);
+  };
+
+  inputEl.addEventListener('keydown', e=>{
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); document.getElementById('send').click(); }
+  });
+
+  // mode buttons
+  document.getElementById('btnCandidate').onclick = ()=>{
+    mode='candidate';
+    document.getElementById('btnCandidate').classList.add('active');
+    document.getElementById('btnMentor').classList.remove('active');
+    renderAll();
+  };
+  document.getElementById('btnMentor').onclick = ()=>{
+    mode='mentor';
+    document.getElementById('btnMentor').classList.add('active');
+    document.getElementById('btnCandidate').classList.remove('active');
+    renderAll();
+  };
+  document.getElementById('btnReset').onclick = ()=>{
+    scores = {};
+    currentId = 1;
+    mode='candidate';
+    document.getElementById('btnCandidate').classList.add('active');
+    document.getElementById('btnMentor').classList.remove('active');
+    renderAll();
+  };
+
+  renderAll();
+</script>
+</body>
+</html>
